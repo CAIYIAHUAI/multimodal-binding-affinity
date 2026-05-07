@@ -26,6 +26,40 @@ RDKit descriptors ────────────────────�
 
 Per-modality LayerNorm before concat addresses the magnitude mismatch between modalities.
 
+## Physics-Informed Training Loss
+
+Beyond using RDKit descriptors as input features, physical knowledge is embedded directly into the **training loss** via a pairwise ranking constraint.
+
+Classical empirical scoring functions (ChemScore, AutoDock Vina) decompose ΔG as:
+
+```
+ΔG ≈ ΔG_HBond  +  ΔG_hydrophobic  +  ΔG_desolvation  +  ΔG_entropy
+```
+
+We approximate this with RDKit descriptors and build a **physics scoring function**:
+
+| Physical term | RDKit proxy | Weight |
+|---|---|---|
+| H-bond donors/acceptors | `NumHDonors`, `NumHAcceptors` | +0.30 each |
+| Hydrophobic burial | `MolLogP` | +0.20 |
+| Desolvation penalty | `TPSA` | −0.15 |
+| Rotational entropy | `NumRotatableBonds` | −0.20 |
+| van der Waals contacts | `MolMR` | +0.15 |
+
+The **pairwise ranking loss** enforces that if the physics score rates molecule *i* much higher than *j*, the model's prediction should also rank *i* above *j*:
+
+```
+L_phys = mean  ReLU( pred_j − pred_i )   over pairs (i,j) where score_i − score_j > margin
+```
+
+Total loss:
+
+```
+L_total = L_MSE  +  λ · L_phys        (λ = 0.1)
+```
+
+This makes the model's **ranking** consistent with classical physical chemistry, which is especially valuable for virtual screening where relative ordering matters more than absolute values.
+
 ## Key Features
 
 - **Scaffold split** (Bemis-Murcko) for realistic generalization evaluation
@@ -51,4 +85,8 @@ The model learns the mid-range trend but shows regression-to-the-mean for extrem
 
 ## Notes
 
-This project uses **physics-informed features** (RDKit descriptors as model input) rather than PINN-style physics constraints embedded in the loss. The term "physics-informed" here refers to the feature augmentation strategy.
+This project uses physics knowledge at **two levels**:
+1. **Physics-informed features** — RDKit descriptors as model input (physicochemical properties)
+2. **Physics-informed loss** — pairwise ranking constraint based on a classical scoring function proxy, embedded directly in the training objective
+
+This is distinct from PINN (Physics-Informed Neural Networks), which embed PDE residuals as loss constraints. Here the physics prior is a classical binding energy scoring function rather than a differential equation.
